@@ -67,10 +67,12 @@ class MicromagSolver:
         self.C_ani  = 2.0 * material.Ku / (MU0 * material.Ms)
         self._gam   = GAMMA * MU0 / (1.0 + self.alpha**2)
 
-        # Easy axis — per-cell array (shape nx×ny×nz×3) or uniform 3-vector
-        u_np = np.asarray(material.u_axis, dtype=np.float64)
-        u_np = u_np / np.linalg.norm(u_np)
-        self._u = to_xp(u_np)          # broadcast-compatible
+        # Easy axis: geometry wire axis overrides material default
+        # (e.g. Co has u_axis=z by default but a wire along x needs u_axis=x)
+        u_raw = geom.meta.get("u_axis", material.u_axis)
+        u_np  = np.asarray(u_raw, dtype=np.float64)
+        u_np  = u_np / np.linalg.norm(u_np)
+        self._u = to_xp(u_np)
 
         # Material mask (GPU array, float for arithmetic)
         self._mask = to_xp(geom.mask.astype(np.float64))  # (nx,ny,nz)

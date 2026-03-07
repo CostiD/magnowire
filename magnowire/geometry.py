@@ -135,6 +135,9 @@ def nanowire(
     # Initial magnetisation
     m0 = _make_initial(nx, ny, nz, mask, initial)
 
+    # Easy axis aligned with wire axis — use this to override material.u_axis
+    u_axis = {"x": (1.,0.,0.), "y": (0.,1.,0.), "z": (0.,0.,1.)}[axis]
+
     aspect = length_nm / diameter_nm
     return Geometry(
         nx=nx, ny=ny, nz=nz, dx=c, dy=c, dz=c,
@@ -145,6 +148,7 @@ def nanowire(
             length_nm    = length_nm,
             aspect_ratio = aspect,
             axis         = axis,
+            u_axis       = u_axis,
             cell_nm      = cell_nm,
             pad_cells    = pad_cells,
             n_wire_ax    = n_wire_ax,
