@@ -1,0 +1,32 @@
+[build-system]
+requires      = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name        = "magnowire"
+version     = "0.1.0"
+description = "Micromagnetic FD solver for nanowire arrays (OBC + true 3D PBC)"
+readme      = "README.md"
+license     = { text = "MIT" }
+requires-python = ">=3.9"
+
+dependencies = [
+    "numpy>=1.24",
+    "matplotlib>=3.6",
+]
+
+[project.optional-dependencies]
+gpu  = ["cupy-cuda12x"]
+test = ["pytest>=7"]
+dev  = ["jupyter", "notebook", "ipykernel", "pytest>=7"]
+
+[project.urls]
+Repository = "https://github.com/yourname/magnowire"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["magnowire*"]
+
+[tool.pytest.ini_options]
+testpaths = ["magnowire/tests"]
+addopts   = "-v"
