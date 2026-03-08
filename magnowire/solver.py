@@ -184,6 +184,63 @@ class MicromagSolver:
         k4 = self._dm_dt(m +     dt*k3, H_ext)
         return self._normalize(m + (dt/6.0)*(k1 + 2*k2 + 2*k3 + k4))
 
+    def adaptive_rk4_step(
+        self,
+        m,
+        H_ext,
+        dt:         float,
+        dt_max:     float = 1e-11,
+        dt_min:     float = 1e-16,
+        target_dm:  float = 0.05,
+        headroom:   float = 0.85,
+    ):
+        """
+        Single RK4 step with dt chosen so that max spin rotation ≤ target_dm rad.
+
+        Uses k1 to estimate max_dm_dt (OOMMF-style), shrinks dt if needed,
+        then returns the stepped state and a suggested dt for the next call.
+
+        Parameters
+        ----------
+        m          : current normalised magnetisation
+        H_ext      : applied field [A/m]
+        dt         : suggested dt for this step [s]
+        dt_max     : hard upper bound on dt [s]
+        dt_min     : hard lower bound on dt [s] (prevents infinite loops)
+        target_dm  : target max rotation per step [rad]  (OOMMF default ~0.1)
+        headroom   : safety factor for dt suggestion
+
+        Returns
+        -------
+        m_new    : ndarray  — new normalised magnetisation
+        dt_used  : float    — dt actually used
+        dt_next  : float    — suggested dt for next step
+        """
+        k1 = self._dm_dt(m, H_ext)
+
+        # max |dm/dt| over all magnetic cells [rad/s]
+        dm_dt_mag = float(to_np(
+            xp.max(xp.linalg.norm(k1[self._mask.astype(bool)], axis=-1))
+        )) if self._mask.any() else 1.0
+
+        if dm_dt_mag > 0:
+            dt_stable = headroom * target_dm / dm_dt_mag
+        else:
+            dt_stable = dt_max
+
+        dt_used = float(np.clip(min(dt, dt_stable), dt_min, dt_max))
+
+        # Full RK4 with the safe dt
+        k2 = self._dm_dt(m + 0.5*dt_used*k1, H_ext)
+        k3 = self._dm_dt(m + 0.5*dt_used*k2, H_ext)
+        k4 = self._dm_dt(m +     dt_used*k3, H_ext)
+        m_new = self._normalize(m + (dt_used/6.0)*(k1 + 2*k2 + 2*k3 + k4))
+
+        # Suggest next dt — allow growth toward dt_max
+        dt_next = float(np.clip(dt_stable, dt_min, dt_max))
+
+        return m_new, dt_used, dt_next
+
     # ── High-level integration ────────────────────────────────────────────────
 
     def run(

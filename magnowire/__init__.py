@@ -24,7 +24,7 @@ Quick start
 >>> print(metrics)
 """
 
-from . import materials, geometry, demag, solver, hysteresis, analysis
+from . import materials, geometry, demag, solver, hysteresis, analysis, cg
 from ._backend import BACKEND, GPU
 
 __version__ = "0.1.0"

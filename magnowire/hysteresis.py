@@ -17,6 +17,7 @@ from typing import Optional, Sequence, Tuple
 from ._backend import xp, GPU, to_np, to_xp
 from .constants import MU0, GAMMA
 from .solver import MicromagSolver
+from .cg import cg_minimise
 
 
 @dataclass
@@ -52,6 +53,13 @@ def hysteresis_loop(
     max_relax_factor: float        = 4.0,
     save_states:    bool           = False,
     verbose:        bool           = True,
+    adaptive:       bool           = True,
+    dt_max:         float          = 1e-11,
+    dt_min:         float          = 1e-16,
+    target_dm:      float          = 0.05,
+    cg_mode:        bool           = True,
+    cg_tol:         float          = 1e3,
+    cg_max_iter:    int            = 2000,
 ) -> HysteresisResult:
     """
     Run a full quasi-static hysteresis loop.
@@ -72,6 +80,10 @@ def hysteresis_loop(
     max_relax_factor: float  Cap on adaptive n_steps (× t_relax).
     save_states     : bool   If True, save m snapshot at each field point.
     verbose         : bool   Print progress.
+    adaptive        : bool   Use adaptive dt (recommended, default True).
+    dt_max          : float  Hard upper bound on adaptive dt [s].
+    dt_min          : float  Hard lower bound on adaptive dt [s].
+    target_dm       : float  Max spin rotation per step [rad] (default 0.05).
 
     Returns
     -------
@@ -82,13 +94,40 @@ def hysteresis_loop(
     B2      = np.linspace(-B_max,  B_max, n_field)
     B_sweep = np.concatenate([B1, B2[1:]])
 
-    n_base  = int(round(t_relax_ps * 1e-12 / dt))
+    t_relax = t_relax_ps * 1e-12   # s
     B_floor = B_min_relax_mT * 1e-3   # T
 
     if verbose:
+        if cg_mode:
+            mode_str = f"CG minimiser (tol={cg_tol:.0e} A/m)"
+        elif adaptive:
+            mode_str = f"adaptive RK4 (target_dm={target_dm} rad)"
+        else:
+            mode_str = f"fixed RK4 dt={dt*1e12:.1f} ps"
         print(f"\n  Hysteresis loop: {len(B_sweep)} field points")
         print(f"  B_max={B_max*1e3:.0f}mT  n_field={n_field}  "
-              f"dt={dt*1e12:.1f}ps  t_relax≥{t_relax_ps:.0f}ps")
+              f"t_relax≥{t_relax_ps:.0f}ps  mode={mode_str}")
+
+    def _integrate_for(m_cur, H_ext, t_target, dt_start):
+        """Integrate for t_target seconds, returning (m_final, dt_last, n_steps)."""
+        if adaptive:
+            t_done = 0.0
+            dt_cur = dt_start
+            n = 0
+            while t_done < t_target:
+                dt_req = min(dt_cur, t_target - t_done)
+                m_cur, dt_used, dt_cur = solver.adaptive_rk4_step(
+                    m_cur, H_ext, dt_req,
+                    dt_max=dt_max, dt_min=dt_min, target_dm=target_dm,
+                )
+                t_done += dt_used
+                n += 1
+            return m_cur, dt_cur, n
+        else:
+            n_steps = int(round(t_target / dt))
+            for _ in range(n_steps):
+                m_cur = solver.rk4_step(m_cur, H_ext, dt)
+            return m_cur, dt, n_steps
 
     # ── Pre-saturate at +B_max ────────────────────────────────────
     m_cur = to_xp(solver.geom.m0).astype(xp.float64)
@@ -97,8 +136,8 @@ def hysteresis_loop(
     if verbose:
         print(f"  Pre-saturating at +{B_max*1e3:.0f} mT ...")
 
-    for _ in range(n_base * 3):
-        m_cur = solver.rk4_step(m_cur, H_init, dt)
+    dt_cur = dt
+    m_cur, dt_cur, n_pre = _integrate_for(m_cur, H_init, t_relax * 3, dt_cur)
 
     _check_saturation(m_cur, solver, verbose)
 
@@ -110,14 +149,20 @@ def hysteresis_loop(
     for i_f, B_val in enumerate(B_sweep):
         H_ext = _field_vec(B_val, field_axis)
 
-        # Adaptive relaxation steps
-        abs_B   = max(abs(B_val), B_floor)
-        tau     = 1.0 / (1.0 * GAMMA * abs_B)   # s  (α=1 relaxation time)
-        n_steps = max(n_base, int(5 * tau / dt))
-        n_steps = min(n_steps, int(n_base * max_relax_factor))
-
-        for _ in range(n_steps):
-            m_cur = solver.rk4_step(m_cur, H_ext, dt)
+        if cg_mode:
+            m_np, info = cg_minimise(
+                solver, to_np(m_cur), H_ext,
+                tol=cg_tol, max_iter=cg_max_iter, verbose=False,
+            )
+            m_cur   = to_xp(m_np).astype(xp.float64)
+            n_steps = info["n_iter"]
+            dt_cur  = dt   # unused in CG mode, keep for display
+        else:
+            # Adaptive relaxation time: longer near H=0
+            abs_B   = max(abs(B_val), B_floor)
+            tau     = 1.0 / (GAMMA * abs_B)
+            t_this  = np.clip(5 * tau, t_relax, t_relax * max_relax_factor)
+            m_cur, dt_cur, n_steps = _integrate_for(m_cur, H_ext, t_this, dt_cur)
 
         m_np = to_np(m_cur)
         mask = solver.geom.mask
@@ -130,10 +175,12 @@ def hysteresis_loop(
         if verbose and ((i_f + 1) % max(1, len(B_sweep)//10) == 0 or i_f == 0):
             elapsed = time.time() - t0
             eta = elapsed / (i_f + 1) * (len(B_sweep) - i_f - 1) if i_f > 0 else 0
+            dt_show = dt_cur if not cg_mode else 0.0
+            step_str = f"iters={n_steps}" if cg_mode else f"steps={n_steps}  dt={dt_show*1e15:.0f}fs"
             print(f"    [{i_f+1:3d}/{len(B_sweep)}]  "
                   f"μ₀H={B_val*1e3:+7.1f} mT  "
                   f"⟨Mx⟩/Ms={avg[0]:+.4f}  "
-                  f"steps={n_steps}  ETA {eta:.0f}s")
+                  f"{step_str}  ETA {eta:.0f}s")
 
     if verbose:
         print(f"  Done in {time.time()-t0:.1f}s")
