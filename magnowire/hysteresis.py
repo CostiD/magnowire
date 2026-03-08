@@ -57,7 +57,7 @@ def hysteresis_loop(
     dt_max:         float          = 1e-11,
     dt_min:         float          = 1e-16,
     target_dm:      float          = 0.05,
-    cg_mode:        bool           = True,
+    cg_mode:        bool           = False,
     cg_tol:         float          = 1e3,
     cg_max_iter:    int            = 2000,
 ) -> HysteresisResult:
