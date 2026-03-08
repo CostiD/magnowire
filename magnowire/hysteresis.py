@@ -47,7 +47,7 @@ def hysteresis_loop(
     B_max:          float          = 100e-3,
     n_field:        int            = 21,
     field_axis:     int            = 0,
-    t_relax_ps:     float          = 2000.0,
+    t_relax_ps:     float          = 500.0,
     dt:             float          = 1e-12,
     B_min_relax_mT: float          = 3.0,
     max_relax_factor: float        = 4.0,
@@ -137,7 +137,7 @@ def hysteresis_loop(
         print(f"  Pre-saturating at +{B_max*1e3:.0f} mT ...")
 
     dt_cur = dt
-    m_cur, dt_cur, n_pre = _integrate_for(m_cur, H_init, t_relax * 3, dt_cur)
+    m_cur, dt_cur, n_pre = _integrate_for(m_cur, H_init, t_relax, dt_cur)
 
     _check_saturation(m_cur, solver, verbose)
 

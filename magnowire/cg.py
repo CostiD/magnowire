@@ -185,7 +185,7 @@ def cg_minimise(
         g     = _mxHxm(m, H_eff)          # (nx,ny,nz,3), tangent to sphere
 
         # convergence check
-        g_mag = xp.linalg.norm(g[mask_bool], axis=-1)
+        g_mag = xp.linalg.norm(g, axis=-1) * solver._mask
         max_torque = float(to_np(xp.max(g_mag)))
         if max_torque < tol:
             break

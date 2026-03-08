@@ -218,10 +218,9 @@ class MicromagSolver:
         """
         k1 = self._dm_dt(m, H_ext)
 
-        # max |dm/dt| over all magnetic cells [rad/s]
-        dm_dt_mag = float(to_np(
-            xp.max(xp.linalg.norm(k1[self._mask.astype(bool)], axis=-1))
-        )) if self._mask.any() else 1.0
+        # max |dm/dt| over magnetic cells — stay on GPU, avoid mask indexing sync
+        dm_dt_norm = xp.linalg.norm(k1, axis=-1) * self._mask  # zeros outside
+        dm_dt_mag  = float(to_np(xp.max(dm_dt_norm)))
 
         if dm_dt_mag > 0:
             dt_stable = headroom * target_dm / dm_dt_mag
